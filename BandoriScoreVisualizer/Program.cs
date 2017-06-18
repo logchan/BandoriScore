@@ -27,7 +27,7 @@ namespace BandoriScoreVisualizer
                 // data = JsonConvert.DeserializeObject<ParsedData>(File.ReadAllText(jsonFile));
                 var root = JObject.Parse(File.ReadAllText(jsonFile));
                 data.MetaData = JsonConvert.DeserializeObject<MetaData>(root["metadata"].ToString());
-                var jsonNotes = (JArray) root["notes"];
+                var jsonNotes = (JArray)root["notes"];
                 var notes = data.Notes;
                 foreach (JObject jNote in jsonNotes)
                 {
@@ -65,7 +65,7 @@ namespace BandoriScoreVisualizer
                 Console.WriteLine($"Cannot read {jsonFile}: {ex.GetDetails()}");
                 return;
             }
-            
+
             Bitmap bm;
             try
             {
@@ -104,25 +104,20 @@ namespace BandoriScoreVisualizer
                 NumberOfBars = lastEnd.Bar + 1
             };
 
-            var bm = new Bitmap((int) settings.ImageWidth, (int) settings.ImageHeight);
+            var bm = new Bitmap((int)settings.ImageWidth, (int)settings.ImageHeight);
             var g = Graphics.FromImage(bm);
             g.CompositingQuality = CompositingQuality.HighQuality;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            // draw bg
-            g.FillRectangle(BgBrush, new RectangleF(0, 0, settings.ImageWidth, settings.ImageHeight));
 
-            // draw meta
-            g.DrawString(data.MetaData.Title, MetaFont, Brushes.White, new PointF(10, 10));
-            g.DrawString($"BPM {data.MetaData.Bpm}", MetaFont, Brushes.White, new PointF(10, 40));
 
             // draw grid
             for (var track = 0; track <= 7; ++track)
             {
                 var bottom = settings.GridPosition(track, new Timing(0, 0, 1));
                 var top = settings.GridPosition(track, new Timing(lastEnd.Bar, 1, 1));
-                g.DrawLine(TrackPen, bottom, top);
+                g.DrawLine((track == 0 || track == 7) ? BarPen : TrackPen, bottom, top);
             }
             for (var bar = 0; bar <= lastEnd.Bar + 1; ++bar)
             {
@@ -132,9 +127,10 @@ namespace BandoriScoreVisualizer
                 );
                 var textPoint = settings.GridPosition(0, new Timing(bar, 0, 1));
                 textPoint.X -= 42 + settings.NoteRadius;
-                textPoint.Y -= 10;
+                StringFormat sf = new StringFormat();
+                sf.LineAlignment = StringAlignment.Center;
 
-                g.DrawString((bar + 1).ToString("000"), BarNumberFont, Brushes.White, textPoint);
+                g.DrawString((bar + 1).ToString("000"), BarNumberFont, Brushes.White, textPoint, sf);
 
                 if (bar == lastEnd.Bar + 1)
                     continue;
@@ -150,8 +146,8 @@ namespace BandoriScoreVisualizer
             // draw sync lines
             SlideNote activeSlide = null;
             var visibleNotes = (from note in data.Notes
-                               where note.Visible
-                               select note).ToList();
+                                where note.Visible
+                                select note).ToList();
             for (var i = 0; i < visibleNotes.Count; ++i)
             {
                 var curr = visibleNotes[i];
@@ -221,7 +217,55 @@ namespace BandoriScoreVisualizer
                 note.Draw(settings, g);
             }
 
-            return bm;
+            var fbm = new Bitmap((int)settings.FinalImageWidth, (int)settings.FinalImageHeight);
+            var fg = Graphics.FromImage(fbm);
+
+            // draw bg
+            fg.FillRectangle(BgBrush, new RectangleF(0, 0, settings.FinalImageWidth, settings.FinalImageHeight));
+
+            // draw meta
+            fg.DrawString($"{data.MetaData.Title} [{data.MetaData.Difficulty.ToUpper()}] ★{data.MetaData.Level} Combo {data.MetaData.Combo}", MetaFont, Brushes.White, new PointF(10, 10));
+            fg.DrawString($"BPM {data.MetaData.Bpm}", MetaFont, Brushes.White, new PointF(10, MetaFont.Height + 12));
+
+            var col = 0;
+            for (var start = 0; start < settings.NumberOfBars; start += settings.BarChunkSize, col++)
+            {
+                var end = Math.Min(start + settings.BarChunkSize, settings.NumberOfBars);
+                var chunkSize = end - start;
+                var sourceTop = settings.ImageHeight - settings.ImageMargin - end * settings.BarHeight - settings.BarHeight / 8;
+                var sourceHeight = chunkSize * settings.BarHeight + settings.BarHeight / 4;
+                var targetTop = settings.ImageMargin + (settings.BarChunkSize - chunkSize) * settings.BarHeight;
+                var targetLeft = col * settings.ColumnWidth;
+                fg.DrawImage(
+                    bm,
+                    targetLeft, targetTop,
+                    new RectangleF(
+                        0, sourceTop,
+                        settings.ImageWidth, sourceHeight
+                    ),
+                    GraphicsUnit.Pixel
+                );
+                if(start > 0)
+                {
+                    fg.DrawLine(BarPen,
+                        targetLeft + settings.ImageMargin - settings.NoteMargin / 2,
+                        settings.FinalImageHeight - settings.ImageMargin,
+                        targetLeft + settings.ColumnWidth + settings.NoteMargin / 2,
+                        settings.FinalImageHeight - settings.ImageMargin
+                    );
+                }
+                if(start + settings.BarChunkSize < settings.NumberOfBars)
+                {
+                    fg.DrawLine(BarPen,
+                        targetLeft + settings.ImageMargin - settings.NoteMargin / 2,
+                        settings.ImageMargin,
+                        targetLeft + settings.ColumnWidth + settings.NoteMargin / 2,
+                        settings.ImageMargin
+                    );
+                }
+            }
+
+            return fbm;
         }
     }
 }
