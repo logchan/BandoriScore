@@ -11,6 +11,15 @@ namespace BandoriScoreVisualizer.Model
         public float ImageMargin { get; set; } = 120;
         public int NumberOfBars { get; set; }
         public float NoteOuterWidth { get; set; } = 2;
+
+        public Brush BgBrush { get; set; } = new SolidBrush(Color.FromArgb(32, 32, 32));
+        public Pen BarPen { get; set; } = new Pen(Brushes.Gray, 3);
+        public Pen SubbarPen { get; set; } = new Pen(Brushes.Gray, 1);
+        public Pen TrackPen { get; set; } = new Pen(Brushes.Gray, 1);
+        public Font BarNumberFont { get; set; } = new Font("Consolas", 16.0f);
+        public Font MetaFont { get; set; } = new Font("Microsoft YaHei", 16.0f);
+        public Pen SyncPen { get; set; } = new Pen(Brushes.White, 4);
+
         public float NoteRectWidth => NoteRadius * 2 + 6;
         public float NoteRectHeight => NoteRadius * 0.2f;
 

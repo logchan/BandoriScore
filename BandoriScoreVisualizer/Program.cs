@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Configuration;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.IO;
 using System.Linq;
 using BandoriScoreVisualizer.Model;
@@ -24,13 +26,16 @@ namespace BandoriScoreVisualizer
             var data = new ParsedData();
             try
             {
-                // data = JsonConvert.DeserializeObject<ParsedData>(File.ReadAllText(jsonFile));
                 var root = JObject.Parse(File.ReadAllText(jsonFile));
                 data.MetaData = JsonConvert.DeserializeObject<MetaData>(root["metadata"].ToString());
                 var jsonNotes = (JArray)root["notes"];
                 var notes = data.Notes;
-                foreach (JObject jNote in jsonNotes)
+
+                foreach (var token in jsonNotes)
                 {
+                    if (!(token is JObject))
+                        continue;
+                    var jNote = (JObject)token;
                     var type = jNote["type"].ToString();
                     Note note = null;
                     switch (type)
@@ -66,10 +71,29 @@ namespace BandoriScoreVisualizer
                 return;
             }
 
+            var appSettings = ConfigurationManager.AppSettings;
+            var fontFile = appSettings["font"];
+            Font metaFont = null;
+            if (!String.IsNullOrEmpty(fontFile))
+            {
+                try
+                {
+                    var fontCollection = new PrivateFontCollection();
+                    fontCollection.AddFontFile(fontFile);
+                    metaFont = new Font(fontCollection.Families[0], 16.0f);
+                    Console.WriteLine($"Use font: {metaFont.Name} ({metaFont.Height})");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Cannot read {fontFile}: {ex.GetDetails()}");
+                    return;
+                }
+            }
+
             Bitmap bm;
             try
             {
-                bm = Draw(data);
+                bm = Draw(data, metaFont);
             }
             catch (Exception ex)
             {
@@ -87,15 +111,17 @@ namespace BandoriScoreVisualizer
             }
         }
 
-        private static readonly Brush BgBrush = new SolidBrush(Color.FromArgb(32, 32, 32));
-        private static readonly Pen BarPen = new Pen(Brushes.Gray, 3);
-        private static readonly Pen SubbarPen = new Pen(Brushes.Gray, 1);
-        private static readonly Pen TrackPen = new Pen(Brushes.Gray, 1);
-        private static readonly Font BarNumberFont = new Font("Consolas", 16.0f);
-        private static readonly Font MetaFont = new Font("Microsoft YaHei", 16.0f);
-        private static readonly Pen SyncPen = new Pen(Brushes.White, 4);
+        private static Graphics CreateGraphics(Image image)
+        {
+            var g = Graphics.FromImage(image);
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.AntiAlias;
+            return g;
+        }
 
-        public static Bitmap Draw(ParsedData data)
+        public static Bitmap Draw(ParsedData data, Font metaFont)
         {
             var lastEnd = data.Notes.Max(n => n.End);
 
@@ -104,39 +130,42 @@ namespace BandoriScoreVisualizer
                 NumberOfBars = lastEnd.Bar + 1
             };
 
+            if (metaFont != null)
+            {
+                settings.MetaFont = metaFont;
+            }
+
             var bm = new Bitmap((int)settings.ImageWidth, (int)settings.ImageHeight);
-            var g = Graphics.FromImage(bm);
-            g.CompositingQuality = CompositingQuality.HighQuality;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-
+            var g = CreateGraphics(bm);
 
             // draw grid
             for (var track = 0; track <= 7; ++track)
             {
                 var bottom = settings.GridPosition(track, new Timing(0, 0, 1));
                 var top = settings.GridPosition(track, new Timing(lastEnd.Bar, 1, 1));
-                g.DrawLine((track == 0 || track == 7) ? BarPen : TrackPen, bottom, top);
+                g.DrawLine((track == 0 || track == 7) ? settings.BarPen : settings.TrackPen, bottom, top);
             }
+
             for (var bar = 0; bar <= lastEnd.Bar + 1; ++bar)
             {
-                g.DrawLine(BarPen,
+                g.DrawLine(settings.BarPen,
                     settings.GridPosition(0, new Timing(bar, 0, 1)),
                     settings.GridPosition(7, new Timing(bar, 0, 1))
                 );
                 var textPoint = settings.GridPosition(0, new Timing(bar, 0, 1));
-                textPoint.X -= 42 + settings.NoteRadius;
-                StringFormat sf = new StringFormat();
-                sf.LineAlignment = StringAlignment.Center;
-
-                g.DrawString((bar + 1).ToString("000"), BarNumberFont, Brushes.White, textPoint, sf);
+                textPoint.X -= 2;
+                g.DrawString((bar + 1).ToString("000"), settings.BarNumberFont, Brushes.White, textPoint, 
+                    new StringFormat
+                    {
+                        Alignment = StringAlignment.Far,
+                        LineAlignment = StringAlignment.Center
+                    });
 
                 if (bar == lastEnd.Bar + 1)
                     continue;
                 for (var beat = 1; beat < 4; ++beat)
                 {
-                    g.DrawLine(SubbarPen,
+                    g.DrawLine(settings.SubbarPen,
                         settings.GridPosition(0, new Timing(bar, beat, 4)),
                         settings.GridPosition(7, new Timing(bar, beat, 4))
                     );
@@ -156,7 +185,7 @@ namespace BandoriScoreVisualizer
                     var next = visibleNotes[i + 1];
                     if (curr.Start == next.Start)
                     {
-                        g.DrawLine(SyncPen,
+                        g.DrawLine(settings.SyncPen,
                             settings.NotePosition(curr.Track, curr.Start),
                             settings.NotePosition(next.Track, next.Start));
                     }
@@ -173,7 +202,7 @@ namespace BandoriScoreVisualizer
                     {
                         if (tap.Time == activeSlide.End)
                         {
-                            g.DrawLine(SyncPen,
+                            g.DrawLine(settings.SyncPen,
                                 settings.NotePosition(curr.Track, curr.Start),
                                 settings.NotePosition(activeSlide.LastTrack, activeSlide.End));
                             activeSlide = null;
@@ -186,7 +215,7 @@ namespace BandoriScoreVisualizer
                         {
                             if (slide.Start == activeSlide.End)
                             {
-                                g.DrawLine(SyncPen,
+                                g.DrawLine(settings.SyncPen,
                                     settings.NotePosition(curr.Track, curr.Start),
                                     settings.NotePosition(activeSlide.LastTrack, activeSlide.End));
                                 activeSlide = slide;
@@ -196,7 +225,7 @@ namespace BandoriScoreVisualizer
                                 var comp = slide.End.CompareTo(activeSlide.End);
                                 if (comp == 0)
                                 {
-                                    g.DrawLine(SyncPen,
+                                    g.DrawLine(settings.SyncPen,
                                         settings.NotePosition(slide.LastTrack, slide.End),
                                         settings.NotePosition(activeSlide.LastTrack, activeSlide.End));
                                     activeSlide = null;
@@ -218,14 +247,14 @@ namespace BandoriScoreVisualizer
             }
 
             var fbm = new Bitmap((int)settings.FinalImageWidth, (int)settings.FinalImageHeight);
-            var fg = Graphics.FromImage(fbm);
+            var fg = CreateGraphics(fbm);
 
             // draw bg
-            fg.FillRectangle(BgBrush, new RectangleF(0, 0, settings.FinalImageWidth, settings.FinalImageHeight));
+            fg.FillRectangle(settings.BgBrush, new RectangleF(0, 0, settings.FinalImageWidth, settings.FinalImageHeight));
 
             // draw meta
-            fg.DrawString($"{data.MetaData.Title} [{data.MetaData.Difficulty.ToUpper()}] ★{data.MetaData.Level} Combo {data.MetaData.Combo}", MetaFont, Brushes.White, new PointF(10, 10));
-            fg.DrawString($"BPM {data.MetaData.Bpm}", MetaFont, Brushes.White, new PointF(10, MetaFont.Height + 12));
+            fg.DrawString($"{data.MetaData.Title} [{data.MetaData.Difficulty.ToUpper()}] ★{data.MetaData.Level} Combo {data.MetaData.Combo}", settings.MetaFont, Brushes.White, new PointF(10, 10));
+            fg.DrawString($"BPM {data.MetaData.Bpm}", settings.MetaFont, Brushes.White, new PointF(10, settings.MetaFont.Height + 12));
 
             var col = 0;
             for (var start = 0; start < settings.NumberOfBars; start += settings.BarChunkSize, col++)
@@ -247,7 +276,7 @@ namespace BandoriScoreVisualizer
                 );
                 if(start > 0)
                 {
-                    fg.DrawLine(BarPen,
+                    fg.DrawLine(settings.BarPen,
                         targetLeft + settings.ImageMargin - settings.NoteMargin / 2,
                         settings.FinalImageHeight - settings.ImageMargin,
                         targetLeft + settings.ColumnWidth + settings.NoteMargin / 2,
@@ -256,7 +285,7 @@ namespace BandoriScoreVisualizer
                 }
                 if(start + settings.BarChunkSize < settings.NumberOfBars)
                 {
-                    fg.DrawLine(BarPen,
+                    fg.DrawLine(settings.BarPen,
                         targetLeft + settings.ImageMargin - settings.NoteMargin / 2,
                         settings.ImageMargin,
                         targetLeft + settings.ColumnWidth + settings.NoteMargin / 2,
